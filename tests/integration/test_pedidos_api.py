@@ -47,6 +47,12 @@ def test_criar_pedido(client):
     assert corpo["cliente"] == "Maria Silva"
 
 
+def test_criar_nos_limites_maximos(client):
+    # 1.000.000 x 999.999,99 é o maior valor_total possível e precisa caber em NUMERIC(14,2).
+    corpo = criar(client, quantidade=1_000_000, valor_unitario=999999.99)
+    assert corpo["valor_total"] == 999999990000.0
+
+
 def test_criar_remove_espacos_nas_pontas(client):
     corpo = criar(client, cliente="  Maria  ")
     assert corpo["cliente"] == "Maria"
@@ -67,6 +73,10 @@ def test_criar_remove_espacos_nas_pontas(client):
         {**PEDIDO_VALIDO, "cliente": "   "},
         {**PEDIDO_VALIDO, "valor_total": 10},
         {**PEDIDO_VALIDO, "status": "CONFIRMADO"},
+        {**PEDIDO_VALIDO, "quantidade": 1_000_001},
+        {**PEDIDO_VALIDO, "quantidade": 2_147_483_648},
+        {**PEDIDO_VALIDO, "valor_unitario": 1_000_000},
+        {**PEDIDO_VALIDO, "quantidade": 1000, "valor_unitario": 9999999999.99},
     ],
     ids=[
         "sem-cliente",
@@ -81,6 +91,10 @@ def test_criar_remove_espacos_nas_pontas(client):
         "cliente-espacos",
         "extra-valor_total",
         "extra-status",
+        "quantidade-acima-do-limite",
+        "quantidade-estoura-integer",
+        "valor-acima-do-limite",
+        "total-estouraria-coluna",
     ],
 )
 def test_criar_invalido_422(client, payload):
@@ -107,6 +121,11 @@ def test_consultar_inexistente_404(client):
 
 def test_consultar_id_nao_numerico_422(client):
     assert client.get("/pedidos/abc").status_code == 422
+
+
+@pytest.mark.parametrize("pedido_id", [99999999999, 2_147_483_648, 0, -1])
+def test_consultar_id_fora_do_intervalo_422(client, pedido_id):
+    assert client.get(f"/pedidos/{pedido_id}").status_code == 422
 
 
 # --- GET /pedidos ---------------------------------------------------------
@@ -167,6 +186,11 @@ def test_transicoes_invalidas_409(client, preparo, novo, atual):
 
 def test_alterar_status_inexistente_404(client):
     assert patch_status(client, 999, "CONFIRMADO").status_code == 404
+
+
+@pytest.mark.parametrize("pedido_id", [99999999999, 0])
+def test_alterar_status_id_fora_do_intervalo_422(client, pedido_id):
+    assert patch_status(client, pedido_id, "CONFIRMADO").status_code == 422
 
 
 @pytest.mark.parametrize(

@@ -16,13 +16,21 @@ DecimalComoNumero = Annotated[
 ]
 
 
+# Limites garantem que nada estoure as colunas do banco: quantidade cabe em
+# INTEGER e o valor_total máximo (1.000.000 x 999.999,99) cabe em NUMERIC(14,2).
+QUANTIDADE_MAXIMA = 1_000_000
+VALOR_UNITARIO_MAXIMO = Decimal("999999.99")
+
+
 class PedidoCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     cliente: TextoObrigatorio
     produto: TextoObrigatorio
-    quantidade: StrictInt = Field(gt=0)
-    valor_unitario: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
+    quantidade: StrictInt = Field(gt=0, le=QUANTIDADE_MAXIMA)
+    valor_unitario: Decimal = Field(
+        gt=0, le=VALOR_UNITARIO_MAXIMO, max_digits=8, decimal_places=2
+    )
 
 
 class StatusUpdate(BaseModel):

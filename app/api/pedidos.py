@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, Response, status
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Path, Response, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -7,6 +9,9 @@ from app.schemas.pedido import PedidoCreate, PedidoResponse, StatusUpdate
 from app.services.pedido_service import PedidoService
 
 router = APIRouter(prefix="/pedidos", tags=["pedidos"])
+
+# O id é INTEGER no banco: fora desse intervalo responde 422 em vez de estourar na query.
+PedidoId = Annotated[int, Path(ge=1, le=2_147_483_647)]
 
 
 def get_pedido_service(db: Session = Depends(get_db)) -> PedidoService:
@@ -35,13 +40,13 @@ def listar_pedidos(service: PedidoService = Depends(get_pedido_service)):
 
 
 @router.get("/{pedido_id}", response_model=PedidoResponse)
-def consultar_pedido(pedido_id: int, service: PedidoService = Depends(get_pedido_service)):
+def consultar_pedido(pedido_id: PedidoId, service: PedidoService = Depends(get_pedido_service)):
     return service.consultar(pedido_id)
 
 
 @router.patch("/{pedido_id}/status", response_model=PedidoResponse)
 def alterar_status(
-    pedido_id: int,
+    pedido_id: PedidoId,
     dados: StatusUpdate,
     service: PedidoService = Depends(get_pedido_service),
 ):
