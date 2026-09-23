@@ -62,9 +62,13 @@ flowchart LR
 │   ├── conftest.py                # cria o banco pedidos_test, fixtures de cliente e limpeza
 │   ├── unit/                      # testes do Service com repositório falso (sem banco)
 │   └── integration/               # testes HTTP com PostgreSQL real
-├── docs/plano_desenvolvimento.md  # plano/requisitos do trabalho
+├── docs/
+│   ├── plano_desenvolvimento.md   # plano/requisitos do trabalho
+│   └── plano_ui.md                # plano do painel de testes (opcional)
+├── inspector/                     # painel: serviço somente leitura do banco + controle restrito do Docker
+├── ui/                            # painel: React + nginx (proxy para a API e o inspetor)
 ├── Dockerfile                     # imagem da aplicação
-├── docker-compose.yml             # serviços pedidos, postgres e tests (profile test)
+├── docker-compose.yml             # pedidos, postgres, tests (profile test), ui e inspector (profile ui)
 ├── requirements.txt               # dependências de execução
 ├── requirements-dev.txt           # dependências de teste
 ├── pytest.ini
@@ -133,7 +137,7 @@ location: /pedidos/1
 {"id":1,"cliente":"Maria Silva","produto":"Teclado","quantidade":2,"valor_unitario":149.9,"valor_total":299.8,"status":"CRIADO","data_criacao":"2026-09-23T15:34:30.106011Z"}
 ```
 
-O cliente não pode enviar `id`, `valor_total`, `status` ou `data_criacao`: campos extras resultam em `422`. Também dão `422`: campo obrigatório ausente, `quantidade` não inteira ou ≤ 0, `valor_unitario` ≤ 0 ou com mais de 2 casas decimais, `cliente`/`produto` vazios ou só com espaços.
+O cliente não pode enviar `id`, `valor_total`, `status` ou `data_criacao`: campos extras resultam em `422`. Também dão `422`: campo obrigatório ausente, `quantidade` não inteira, ≤ 0 ou acima de 1.000.000, `valor_unitario` ≤ 0, acima de 999.999,99 ou com mais de 2 casas decimais, `cliente`/`produto` vazios ou só com espaços. Os limites máximos garantem que nenhum valor estoure as colunas do banco (o maior `valor_total` possível cabe em `NUMERIC(14,2)`).
 
 ### Consultar pedido
 
@@ -202,12 +206,12 @@ O `/health` não acessa o banco nesta versão; é uma verificação leve que ser
 
 | Campo | Tipo | Observação |
 |---|---|---|
-| `id` | inteiro | gerado pelo banco |
+| `id` | inteiro | gerado pelo banco; nas rotas, aceito de 1 a 2.147.483.647 (limite do `INTEGER`), fora disso `422` |
 | `cliente` | texto (até 255) | obrigatório |
 | `produto` | texto (até 255) | obrigatório |
-| `quantidade` | inteiro | > 0 |
-| `valor_unitario` | decimal (12,2) | > 0 |
-| `valor_total` | decimal (14,2) | calculado pela aplicação: `quantidade × valor_unitario`, arredondado para 2 casas (ROUND_HALF_UP) |
+| `quantidade` | inteiro | de 1 a 1.000.000 |
+| `valor_unitario` | decimal (12,2) | maior que 0 e até 999.999,99 (no máximo 2 casas) |
+| `valor_total` | decimal (14,2) | calculado pela aplicação: `quantidade × valor_unitario`, arredondado para 2 casas (ROUND_HALF_UP). Com os limites acima, o máximo é 999.999.990.000,00, que cabe na coluna |
 | `status` | `CRIADO` / `CONFIRMADO` / `CANCELADO` | inicial sempre `CRIADO` |
 | `data_criacao` | data/hora com fuso | definida pelo banco |
 
@@ -233,7 +237,7 @@ docker compose --profile test run --rm tests
 O serviço `tests` pertence ao profile `test`, então não sobe com `docker compose up`. Ele usa o banco separado `pedidos_test` (criado automaticamente pelo `conftest.py`), nunca o banco principal.
 
 - **Unitários** (`tests/unit/`): testam o `PedidoService` com um repositório falso em memória, sem banco. Cobrem cálculo e arredondamento do `valor_total` (ex.: `3 × 0.335 = 1.01`), status inicial `CRIADO`, pedido inexistente, todas as transições permitidas, as transições inválidas e que alterar o status não modifica os demais campos.
-- **Integração** (`tests/integration/`): testam a API via `TestClient` com PostgreSQL real. Cobrem `/health`, criação (201, `Location`, total, status), validações (422), consulta (200/404/422), listagem (vazia e ordenada), alteração de status (200/404/409/422) e persistência (o pedido é lido por uma nova sessão e por um novo cliente).
+- **Integração** (`tests/integration/`): testam a API via `TestClient` com PostgreSQL real. Cobrem `/health`, criação (201, `Location`, total, status, valores nos limites máximos), validações (422, inclusive valores que estourariam as colunas do banco), consulta (200/404/422, inclusive ids fora do intervalo do `INTEGER`), listagem (vazia e ordenada), alteração de status (200/404/409/422) e persistência (o pedido é lido por uma nova sessão e por um novo cliente).
 
 O aviso `StarletteDeprecationWarning` sobre `httpx` que aparece na saída do pytest vem da própria biblioteca de testes e não afeta o resultado.
 
@@ -276,6 +280,7 @@ docker compose down -v   # remove também o volume: apaga todos os pedidos
 - **`Decimal` para dinheiro** em toda a cadeia interna; no JSON os valores saem como número (ex.: `149.9`).
 - **Status como texto** (`native_enum=False`), sem tipo ENUM do PostgreSQL, para facilitar a inclusão de novos estados.
 - **409 Conflict** para transição de status inválida (o pedido existe, mas seu estado atual impede a operação); 404 para pedido inexistente; 422 para corpo inválido.
+- **Limites máximos na validação** (`quantidade` ≤ 1.000.000, `valor_unitario` ≤ 999.999,99, `id` ≤ 2.147.483.647): valores extremos recebem 422 na borda da API, em vez de estourar as colunas do banco e virar erro 500.
 - **Campos extras proibidos** (`extra="forbid"`) na entrada: `id`, `valor_total`, `status` e `data_criacao` são sempre definidos pela aplicação/banco.
 - **Porta do banco não exposta ao host**: só a API é pública; o banco fica na rede interna `backend`.
 - **Sem `container_name`** no compose, para permitir múltiplas instâncias no futuro.
@@ -304,7 +309,7 @@ docker compose --profile ui down              # derruba tudo (mantém os dados)
 | Pedidos | Tabela com busca, filtro e ordenação; criação de pedido (erros 422 aparecem em cada campo); detalhes e botões para todas as mudanças de status, inclusive as proibidas (para ver o 409). |
 | Console de API | "Postman" embutido: presets para cada endpoint, método e caminho livres, corpo JSON (pode ser inválido), resposta completa e "Copiar como curl". |
 | Banco de dados | Informações do PostgreSQL, tabelas, schema (colunas, constraints CHECK, índices) e as linhas reais, com auto-refresh e destaque do que mudou. |
-| Cenários | 43 testes automatizados (saúde, criação, validações, consulta, máquina de estados e consistência API × banco) com passou/falhou e esperado × obtido. |
+| Cenários | 50 testes automatizados (saúde, criação, validações, consulta, máquina de estados, limites de valores e consistência API × banco) com passou/falhou e esperado × obtido. |
 | Máquina de estados | Diagrama interativo: clique num estado para enviar o PATCH real e ver a transição aceita ou o 409. |
 | Infraestrutura | Estado, uptime, imagem e portas de cada container; restart de `pedidos` e `postgres`; logs ao vivo. |
 | Experimento | Assistente do experimento "o dado está onde?": cria um pedido, reinicia o container, mede o tempo fora do ar e compara os dados antes e depois. |
