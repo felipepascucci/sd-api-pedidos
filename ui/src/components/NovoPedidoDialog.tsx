@@ -15,6 +15,10 @@ type Campo = (typeof CAMPOS)[number]
 type Valores = Record<Campo, string>
 type Erros = Partial<Record<Campo | '_geral', string[]>>
 
+// Espelho dos limites de app/schemas/pedido.py.
+const QUANTIDADE_MAXIMA = 1_000_000
+const VALOR_UNITARIO_MAXIMO = 999_999.99
+
 const VAZIO: Valores = { cliente: '', produto: '', quantidade: '', valor_unitario: '' }
 
 const ROTULOS: Record<Campo, string> = {
@@ -52,9 +56,11 @@ export function validarLocal(v: Valores): Erros {
   const q = v.quantidade.trim()
   if (!q) erros.quantidade = ['Obrigatório']
   else if (!/^\d+$/.test(q) || Number(q) <= 0) erros.quantidade = ['Deve ser um inteiro maior que 0']
+  else if (Number(q) > QUANTIDADE_MAXIMA) erros.quantidade = ['Máximo de 1.000.000']
   const vu = v.valor_unitario.trim().replace(',', '.')
   if (!vu) erros.valor_unitario = ['Obrigatório']
   else if (!/^\d+(\.\d+)?$/.test(vu) || Number(vu) <= 0) erros.valor_unitario = ['Deve ser um número maior que 0']
+  else if (Number(vu) > VALOR_UNITARIO_MAXIMO) erros.valor_unitario = ['Máximo de 999.999,99']
   else if ((vu.split('.')[1] ?? '').length > 2) erros.valor_unitario = ['No máximo 2 casas decimais']
   return erros
 }

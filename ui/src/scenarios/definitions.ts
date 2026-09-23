@@ -285,6 +285,52 @@ const estados: Scenario[] = [
   },
 ]
 
+const G_LIMITES = 'Limites (valores extremos → 422, nunca 500)'
+const ID_GIGANTE = 99999999999
+
+const limites: Scenario[] = [
+  rejeita422('23.1', G_LIMITES, 'quantidade acima de 1.000.000', 'Limite máximo da quantidade.', (ctx) => ctx.corpoValido({ quantidade: 1_000_001 })),
+  rejeita422('23.2', G_LIMITES, 'quantidade além do INTEGER (2147483648)', 'Estouraria a coluna INTEGER do banco.', (ctx) =>
+    ctx.corpoValido({ quantidade: 2_147_483_648 }),
+  ),
+  rejeita422('23.3', G_LIMITES, 'valor_unitario acima de 999.999,99', 'Limite máximo do valor unitário.', (ctx) => ctx.corpoValido({ valor_unitario: 1_000_000 })),
+  rejeita422('23.4', G_LIMITES, 'Total que estouraria NUMERIC(14,2)', '1000 × 9.999.999.999,99.', (ctx) =>
+    ctx.corpoValido({ quantidade: 1000, valor_unitario: 9999999999.99 }),
+  ),
+  {
+    id: '23.5',
+    grupo: G_LIMITES,
+    nome: 'Valores nos limites máximos',
+    descricao: '1.000.000 × 999.999,99 é o maior total possível e precisa caber na coluna.',
+    esperado: '201 e valor_total 999999990000',
+    run: async ({ api, corpoValido }) => {
+      const r = await api.criar(corpoValido({ quantidade: 1_000_000, valor_unitario: 999999.99 }))
+      expectStatus(r, 201)
+      expectEqual((r.body as Pedido).valor_total, 999999990000, 'valor_total')
+    },
+  },
+  {
+    id: '23.6',
+    grupo: G_LIMITES,
+    nome: 'GET com id além do INTEGER',
+    descricao: `GET /pedidos/${ID_GIGANTE}.`,
+    esperado: '422 Unprocessable Content',
+    run: async ({ api }) => {
+      expectStatus(await api.consultar(ID_GIGANTE), 422)
+    },
+  },
+  {
+    id: '23.7',
+    grupo: G_LIMITES,
+    nome: 'PATCH com id além do INTEGER',
+    descricao: `PATCH /pedidos/${ID_GIGANTE}/status.`,
+    esperado: '422 Unprocessable Content',
+    run: async ({ api }) => {
+      expectStatus(await api.alterarStatus(ID_GIGANTE, { status: 'CONFIRMADO' }), 422)
+    },
+  },
+]
+
 const G_BANCO = 'Consistência com o banco (inspetor)'
 const banco: Scenario[] = [
   {
@@ -337,5 +383,5 @@ const banco: Scenario[] = [
   },
 ]
 
-export const CENARIOS: Scenario[] = [...saude, ...validacao, ...consulta, ...estados, ...banco]
+export const CENARIOS: Scenario[] = [...saude, ...validacao, ...consulta, ...estados, ...limites, ...banco]
 export { PREFIXO_TESTE }
