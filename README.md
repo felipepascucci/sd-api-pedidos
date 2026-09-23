@@ -231,10 +231,10 @@ Os testes rodam dentro do Docker, sem instalar nada no host:
 
 ```bash
 docker compose up -d --build                  # garante que o postgres está no ar
-docker compose --profile test run --rm tests
+docker compose --profile test run --rm --build tests
 ```
 
-O serviço `tests` pertence ao profile `test`, então não sobe com `docker compose up`. Ele usa o banco separado `pedidos_test` (criado automaticamente pelo `conftest.py`), nunca o banco principal.
+O `--build` garante que a imagem de testes seja reconstruída com o código atual: sem ele, o `docker compose run` reaproveita uma imagem `tests` que já exista e pode testar uma versão antiga. O serviço `tests` pertence ao profile `test`, então não sobe com `docker compose up`. Ele usa o banco separado `pedidos_test` (criado automaticamente pelo `conftest.py`), nunca o banco principal.
 
 - **Unitários** (`tests/unit/`): testam o `PedidoService` com um repositório falso em memória, sem banco. Cobrem cálculo e arredondamento do `valor_total` (ex.: `3 × 0.335 = 1.01`), status inicial `CRIADO`, pedido inexistente, todas as transições permitidas, as transições inválidas e que alterar o status não modifica os demais campos.
 - **Integração** (`tests/integration/`): testam a API via `TestClient` com PostgreSQL real. Cobrem `/health`, criação (201, `Location`, total, status, valores nos limites máximos), validações (422, inclusive valores que estourariam as colunas do banco), consulta (200/404/422, inclusive ids fora do intervalo do `INTEGER`), listagem (vazia e ordenada), alteração de status (200/404/409/422) e persistência (o pedido é lido por uma nova sessão e por um novo cliente).
