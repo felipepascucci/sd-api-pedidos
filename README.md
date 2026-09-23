@@ -281,3 +281,56 @@ docker compose down -v   # remove também o volume: apaga todos os pedidos
 - **Sem `container_name`** no compose, para permitir múltiplas instâncias no futuro.
 - **Container da aplicação roda como usuário não-root** (`appuser`).
 - **Banco de testes separado** (`pedidos_test`), criado pelos próprios testes.
+
+## Painel de testes (opcional)
+
+> **Ferramenta extra do grupo, fora do escopo exigido pelo trabalho.** Ela não sobe com o `docker compose up -d --build` padrão: os serviços `ui` e `inspector` ficam no profile `ui` do compose. A API de Pedidos não foi alterada para atender o painel.
+
+Painel web (React) para testar, visualizar e demonstrar a API: estado dos containers, chamadas com requisição e resposta completas, conteúdo real do banco e o experimento de persistência guiado.
+
+### Como executar
+
+```bash
+docker compose --profile ui up -d --build     # API + banco + painel + inspetor
+# abrir http://localhost:3000
+docker compose --profile ui down              # derruba tudo (mantém os dados)
+```
+
+### Páginas
+
+| Página | O que faz |
+|---|---|
+| Visão geral | Saúde de API, banco e containers (atualiza a cada 5 s), diagrama de arquitetura ao vivo, métricas dos pedidos e últimas requisições. |
+| Pedidos | Tabela com busca, filtro e ordenação; criação de pedido (erros 422 aparecem em cada campo); detalhes e botões para todas as mudanças de status, inclusive as proibidas (para ver o 409). |
+| Console de API | "Postman" embutido: presets para cada endpoint, método e caminho livres, corpo JSON (pode ser inválido), resposta completa e "Copiar como curl". |
+| Banco de dados | Informações do PostgreSQL, tabelas, schema (colunas, constraints CHECK, índices) e as linhas reais, com auto-refresh e destaque do que mudou. |
+| Cenários | 43 testes automatizados (saúde, criação, validações, consulta, máquina de estados e consistência API × banco) com passou/falhou e esperado × obtido. |
+| Máquina de estados | Diagrama interativo: clique num estado para enviar o PATCH real e ver a transição aceita ou o 409. |
+| Infraestrutura | Estado, uptime, imagem e portas de cada container; restart de `pedidos` e `postgres`; logs ao vivo. |
+| Experimento | Assistente do experimento "o dado está onde?": cria um pedido, reinicia o container, mede o tempo fora do ar e compara os dados antes e depois. |
+| Histórico | Todas as requisições feitas pelo painel, com filtros, detalhes, "Reenviar" e "Copiar como curl". |
+
+### Arquitetura do painel
+
+```
+Navegador ──> ui (nginx, localhost:3000)
+                ├── /            → arquivos estáticos do React
+                ├── /api/*       → http://pedidos:8000/*    (API de Pedidos, sem alteração)
+                └── /inspector/* → http://inspector:8001/*  (não publicado no host)
+
+inspector ──> postgres:5432          (conexão somente leitura)
+inspector ──> /var/run/docker.sock   (status, logs e restart de pedidos/postgres)
+```
+
+- **Proxy nginx:** o navegador só fala com `localhost:3000`, então não é preciso habilitar CORS na API.
+- **Inspetor somente leitura:** serviço FastAPI separado (`inspector/`), independente do código da API. Toda conexão ao banco é aberta com `default_transaction_read_only=on` e só executa `SELECT`; nomes de tabela e coluna são validados contra o `information_schema`.
+- **Controle de containers restrito:** o inspetor só enxerga containers do próprio projeto Compose e só permite restart e logs de `pedidos` e `postgres` (qualquer outro serviço recebe 403). Não há stop, remove ou exec.
+- O inspetor não publica porta, e o PostgreSQL continua sem porta publicada.
+
+### Aviso de segurança
+
+O inspetor monta o **Docker socket** (`/var/run/docker.sock`) e roda como root para poder usá-lo. Na prática, isso dá a ele controle sobre o Docker da máquina. As restrições acima limitam o que o código faz, mas o painel foi feito **só para uso local**: não o exponha em rede.
+
+### Dados de teste
+
+Os pedidos criados pelos Cenários, pela Máquina de estados e pelo Experimento usam o cliente com prefixo **`[teste-ui]`** e **permanecem no banco**, porque a API não tem DELETE e o inspetor é somente leitura. Para zerar tudo, use `docker compose --profile ui down -v` (apaga o volume e todos os pedidos).
